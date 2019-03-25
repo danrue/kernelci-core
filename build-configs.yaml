@@ -40,6 +40,9 @@ trees:
   clk:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/clk/linux.git"
 
+  danrue:
+    url: 'https://gitlab.collabora.com/danrue/linux.git'
+
   efi:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/efi/efi.git"
 
@@ -420,6 +423,21 @@ build_configs:
   clk:
     tree: clk
     branch: 'clk-next'
+
+  danrue:
+    tree: danrue
+    branch: 'to-build'
+    variants:
+      gcc-7:
+        build_environment: gcc-7
+        architectures:
+          arm:
+            base_defconfig: 'multi_v7_defconfig'
+          arm64:
+          i386:
+            base_defconfig: 'i386_defconfig'
+          x86_64:
+            base_defconfig: 'x86_64_defconfig'
 
   efi:
     tree: efi

@@ -1,4 +1,4 @@
-@Library('kernelci') _
+@Library('kernelci-danrue') _
 import org.kernelci.debian.RootFS
 
 /* ----------------------------------------------------------------------------

@@ -91,7 +91,7 @@ TREES_WHITELIST
  */
 
 
-@Library('kernelci') _
+@Library('kernelci-danrue') _
 import org.kernelci.build.Kernel
 import org.kernelci.util.Job
 

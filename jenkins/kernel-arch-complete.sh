@@ -181,6 +181,9 @@ if [[ BUILDS_FINISHED -eq 4 ]]; then
         curl -X POST -H "Authorization: $EMAIL_AUTH_TOKEN" -H "Content-Type: application/json" -d '{"job": "'$TREE_NAME'", "kernel": "'$GIT_DESCRIBE'", "git_branch": "'$BRANCH'",  "report_type": "test", "plan": "v4l2-compliance-uvc", "send_to": ["guillaume.tucker@collabora.com"], "format": ["txt"], "delay": 2700}' ${API}/send
         curl -X POST -H "Authorization: $EMAIL_AUTH_TOKEN" -H "Content-Type: application/json" -d '{"job": "'$TREE_NAME'", "kernel": "'$GIT_DESCRIBE'", "git_branch": "'$BRANCH'",  "report_type": "test", "plan": "igt", "send_to": ["guillaume.tucker@collabora.com"], "format": ["txt"], "delay": 2700}' ${API}/send
         curl -X POST -H "Authorization: $EMAIL_AUTH_TOKEN" -H "Content-Type: application/json" -d '{"job": "'$TREE_NAME'", "kernel": "'$GIT_DESCRIBE'", "git_branch": "'$BRANCH'",  "report_type": "test", "plan": "sleep", "send_to": ["guillaume.tucker@collabora.com"], "format": ["txt"], "delay": 2700}' ${API}/send
+    elif [ "$TREE_NAME" == "danrue" ]; then
+        echo "Sending results to Dan Rue"
+        curl -X POST -H "Authorization: $EMAIL_AUTH_TOKEN" -H "Content-Type: application/json" -d '{"job": "'$TREE_NAME'", "kernel": "'$GIT_DESCRIBE'", "git_branch": "'$BRANCH'", "build_report": 1, "format": ["txt"], "send_to": ["dan.rue@linaro.org"], "delay": 60}' ${API}/send
     elif [ "$TREE_NAME" == "tomeu" ]; then
         echo "Sending results to Tomeu"
         curl -X POST -H "Authorization: $EMAIL_AUTH_TOKEN" -H "Content-Type: application/json" -d '{"job": "'$TREE_NAME'", "kernel": "'$GIT_DESCRIBE'", "git_branch": "'$BRANCH'", "build_report": 1, "format": ["txt"], "send_to": ["tomeu.vizoso@collabora.com"], "delay": 60}' ${API}/send
