@@ -435,6 +435,7 @@ build_configs:
           arm:
             base_defconfig: 'multi_v7_defconfig'
           arm64:
+            extra_configs:
           i386:
             base_defconfig: 'i386_defconfig'
           x86_64:
