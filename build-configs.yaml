@@ -430,6 +430,7 @@ build_configs:
     variants:
       gcc-7:
         build_environment: gcc-7
+        fragments:
         architectures:
           arm:
             base_defconfig: 'multi_v7_defconfig'
