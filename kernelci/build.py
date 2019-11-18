@@ -16,13 +16,14 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 import fnmatch
+import itertools
 import json
 import os
 import platform
 import requests
 import shutil
 import stat
-import subprocess
+import tarfile
 import tempfile
 import time
 import urlparse
@@ -160,7 +161,8 @@ def check_new_commit(config, storage):
 
 
 def _update_remote(config, path):
-        shell_cmd("""
+    shell_cmd("""
+set -e
 cd {path}
 if git remote | grep -e '^{remote}$'; then
     git remote set-url {remote} {url}
@@ -175,6 +177,7 @@ fi
 
 def _fetch_tags(path, url=TORVALDS_GIT_URL):
     shell_cmd("""
+set -e
 cd {path}
 git fetch --tags {url}
 """.format(path=path, url=url))
@@ -188,6 +191,7 @@ def update_mirror(config, path):
     """
     if not os.path.exists(path):
         shell_cmd("""
+set -e
 mkdir -p {path}
 cd {path}
 git init --bare
@@ -205,19 +209,19 @@ def update_repo(config, path, ref=None):
     """
     if not os.path.exists(path):
         ref_opt = '--reference={ref}'.format(ref=ref) if ref else ''
-        shell_cmd("""
-git clone {ref} -o {remote} {url} {path}
-""".format(ref=ref_opt, remote=config.tree.name,
-           url=config.tree.url, path=path))
+        shell_cmd("git clone {ref} -o {remote} {url} {path}".format(
+            ref=ref_opt, remote=config.tree.name,
+            url=config.tree.url, path=path))
 
     _update_remote(config, path)
-    _fetch_tags(path)
+    _fetch_tags(path, config.tree.url)
+    _fetch_tags(path, TORVALDS_GIT_URL)
 
     shell_cmd("""
+set -e
 cd {path}
 git reset --hard
 git clean -fd
-git fetch --tags {remote}
 git checkout --detach {remote}/{branch}
 """.format(path=path, remote=config.tree.name, branch=config.branch))
 
@@ -230,8 +234,9 @@ def head_commit(path):
     The returned value is the git SHA of the current HEAD of the branch checked
     out in the local git repository.
     """
-    cmd = """\
-cd {path} &&
+    cmd = """
+set -e
+cd {path}
 git log --pretty=format:%H -n1
 """.format(path=path)
     commit = shell_cmd(cmd)
@@ -248,9 +253,10 @@ def git_describe(tree_name, path):
     currently checked out in the local git repository.
     """
     describe_args = r"--match=v\*" if tree_name == "soc" else ""
-    cmd = """\
-cd {path} && \
-git describe {describe_args} \
+    cmd = """
+set -e
+cd {path}
+git describe {describe_args}
 """.format(path=path, describe_args=describe_args)
     describe = shell_cmd(cmd)
     return describe.strip().replace('/', '_')
@@ -265,9 +271,10 @@ def git_describe_verbose(path):
     the commit currently checked out in the local git repository.  This is
     typically based on a mainline kernel version tag.
     """
-    cmd = r"""\
-cd {path} &&
-git describe --match=v[1-9]\* \
+    cmd = r"""
+set -e
+cd {path}
+git describe --match=v[1-9]\*
 """.format(path=path)
     describe = shell_cmd(cmd)
     return describe.strip()
@@ -280,7 +287,8 @@ def add_kselftest_fragment(path, frag_path='kernel/configs/kselftest.config'):
     *frag_path* is the path where to create the fragment within the repo
     """
     shell_cmd(r"""
-cd {path} &&
+set -e
+cd {path}
 find \
   tools/testing/selftests \
   -name config \
@@ -300,9 +308,13 @@ def make_tarball(kdir, tarball_name):
     *kdir* is the path to the local kernel source directory
     *tarball_name* is the name of the tarball file to create
     """
-    cmd = "tar -czf {name} --exclude=.git -C {kdir} .".format(
-        kdir=kdir, name=tarball_name)
-    subprocess.check_output(cmd, shell=True)
+    cwd = os.getcwd()
+    os.chdir(kdir)
+    _, dirs, files = next(os.walk('.'))
+    with tarfile.open(os.path.join(cwd, tarball_name), "w:gz") as tarball:
+        for item in itertools.chain(dirs, files):
+            tarball.add(item, filter=lambda f: f if f.name != '.git' else None)
+    os.chdir(cwd)
 
 
 def generate_config_fragment(frag, kdir):
@@ -358,6 +370,33 @@ def push_tarball(config, kdir, storage, api, token):
     _upload_files(api, token, path, {tarball_name: open(tarball)})
     os.unlink(tarball)
     return tarball_url
+
+
+def _download_file(url, dest_filename, chunk_size=1024):
+    resp = requests.get(url, stream=True)
+    if resp.status_code == 200:
+        with open(dest_filename, 'wb') as out_file:
+            for chunk in resp.iter_content(chunk_size):
+                out_file.write(chunk)
+        return True
+    else:
+        return False
+
+
+def pull_tarball(kdir, url, dest_filename, retries):
+    if os.path.exists(kdir):
+        shutil.rmtree(kdir)
+    os.makedirs(kdir)
+    for i in range(1, retries + 1):
+        if _download_file(url, dest_filename):
+            break
+        if i < retries:
+            time.sleep(2 ** i)
+    else:
+        return False
+    with tarfile.open(dest_filename, 'r:*') as tarball:
+        tarball.extractall(kdir)
+    return True
 
 
 def _add_frag_configs(kdir, frag_list, frag_paths, frag_configs):
@@ -469,44 +508,58 @@ def _run_make(kdir, arch, target=None, jopt=None, silent=True, cc='gcc',
     return shell_cmd(cmd, True)
 
 
-def _make_defconfig(defconfig, kwargs, fragments, verbose, log_file):
+def _make_defconfig(defconfig, kwargs, extras, verbose, log_file):
     kdir, output_path = (kwargs.get(k) for k in ('kdir', 'output'))
     result = True
 
+    defconfig_kwargs = dict(kwargs)
+    defconfig_opts = dict(defconfig_kwargs['opts'])
+    defconfig_kwargs['opts'] = defconfig_opts
     tmpfile_fd, tmpfile_path = tempfile.mkstemp(prefix='kconfig-')
     tmpfile = os.fdopen(tmpfile_fd, 'w')
+    tmpfile_used = False
     defs = defconfig.split('+')
     target = defs.pop(0)
     for d in defs:
-        if d.startswith('CONFIG_'):
+        if d.startswith('KCONFIG_'):
+            config, value = d.split('=')
+            defconfig_opts[config] = value
+            extras.append(d)
+        elif d.startswith('CONFIG_'):
             tmpfile.write(d + '\n')
-            fragments.append(d)
+            extras.append(d)
+            tmpfile_used = True
         else:
             frag_path = os.path.join(kdir, d)
             if os.path.exists(frag_path):
                 with open(frag_path) as frag:
                     tmpfile.write("\n# fragment from : {}\n".format(d))
                     tmpfile.writelines(frag)
-                fragments.append(os.path.basename(os.path.splitext(d)[0]))
+                    tmpfile_used = True
+                extras.append(os.path.basename(os.path.splitext(d)[0]))
+            else:
+                print("Fragment not found: {}".format(frag_path))
+                result = False
     tmpfile.flush()
 
-    if not _run_make(target=target, **kwargs):
+    if not _run_make(target=target, **defconfig_kwargs):
         result = False
 
-    if result and fragments:
+    if result and tmpfile_used:
         kconfig_frag_name = 'frag.config'
         kconfig_frag = os.path.join(output_path, kconfig_frag_name)
         shutil.copy(tmpfile_path, kconfig_frag)
         os.chmod(kconfig_frag,
                  stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
         rel_path = os.path.relpath(output_path, kdir)
-        cmd = """\
+        cmd = """
+set -e
 cd {kdir}
 export ARCH={arch}
 export HOSTCC={cc}
 export CC={cc}
 export CROSS_COMPILE={cross}
-scripts/kconfig/merge_config.sh -O {output} '{base}' '{frag}' {redir} \
+scripts/kconfig/merge_config.sh -O {output} '{base}' '{frag}' {redir}
 """.format(kdir=kdir, arch=kwargs['arch'], cc=kwargs['cc'],
            cross=kwargs['cross_compile'], output=rel_path,
            base=os.path.join(rel_path, '.config'),
@@ -574,10 +627,10 @@ def build_kernel(build_env, kdir, arch, defconfig=None, jopt=None,
     }
 
     start_time = time.time()
-    fragments = []
+    defconfig_extras = []
     if defconfig:
         result = _make_defconfig(
-            defconfig, kwargs, fragments, verbose, log_file)
+            defconfig, kwargs, defconfig_extras, verbose, log_file)
     elif os.path.exists(dot_config):
         print("Re-using {}".format(dot_config))
         result = True
@@ -618,7 +671,7 @@ def build_kernel(build_env, kdir, arch, defconfig=None, jopt=None,
     bmeta = {
         'build_threads': jopt,
         'build_time': round(build_time, 2),
-        'build_result': 'PASS' if result is True else 'FAIL',
+        'status': 'PASS' if result is True else 'FAIL',
         'arch': arch,
         'cross_compile': cross_compile,
         'compiler': cc,
@@ -633,7 +686,12 @@ def build_kernel(build_env, kdir, arch, defconfig=None, jopt=None,
         defconfig_target = defconfig.split('+')[0]
         bmeta.update({
             'defconfig': defconfig_target,
-            'defconfig_full': '+'.join([defconfig_target] + fragments),
+            'defconfig_full': '+'.join([defconfig_target] + defconfig_extras),
+        })
+    else:
+        bmeta.update({
+            'defconfig': 'none',
+            'defconfig_full': 'none',
         })
 
     vmlinux_file = os.path.join(output_path, 'vmlinux')
@@ -729,15 +787,19 @@ def install_kernel(kdir, tree_name, tree_url, git_branch, git_commit=None,
 
     dts_dir = os.path.join(boot_dir, 'dts')
     dtbs = os.path.join(install_path, 'dtbs')
+    dtb_list = []
     for root, _, files in os.walk(dts_dir):
         for f in fnmatch.filter(files, '*.dtb'):
             dtb_path = os.path.join(root, f)
             dtb_rel = os.path.relpath(dtb_path, dts_dir)
+            dtb_list.append(dtb_rel)
             dest_path = os.path.join(dtbs, dtb_rel)
             dest_dir = os.path.dirname(dest_path)
             if not os.path.exists(dest_dir):
                 os.makedirs(dest_dir)
             shutil.copy(dtb_path, dest_path)
+    with open(os.path.join(install_path, 'dtbs.json'), 'w') as json_file:
+        json.dump({'dtbs': sorted(dtb_list)}, json_file, indent=4)
 
     modules_tarball = None
     if mod_path:
@@ -750,8 +812,9 @@ def install_kernel(kdir, tree_name, tree_url, git_branch, git_commit=None,
 
     build_env = bmeta['build_environment']
     defconfig_full = bmeta['defconfig_full']
+    defconfig_dir = defconfig_full.replace('/', '-')
     publish_path = '/'.join([
-        tree_name, git_branch, describe, arch, defconfig_full, build_env,
+        tree_name, git_branch, describe, arch, defconfig_dir, build_env,
     ])
 
     bmeta.update({
@@ -771,7 +834,7 @@ def install_kernel(kdir, tree_name, tree_url, git_branch, git_commit=None,
         'file_server_resource': publish_path,
     })
 
-    with open(os.path.join(install_path, 'build.json'), 'w') as json_file:
+    with open(os.path.join(install_path, 'bmeta.json'), 'w') as json_file:
         json.dump(bmeta, json_file, indent=4, sort_keys=True)
 
     return True
@@ -793,7 +856,7 @@ def push_kernel(kdir, api, token, install='_install_'):
     """
     install_path = os.path.join(kdir, install)
 
-    with open(os.path.join(install_path, 'build.json')) as f:
+    with open(os.path.join(install_path, 'bmeta.json')) as f:
         bmeta = json.load(f)
 
     artifacts = {}
@@ -833,53 +896,56 @@ def publish_kernel(kdir, install='_install_', api=None, token=None,
         return True
     install_path = os.path.join(kdir, install)
 
-    with open(os.path.join(install_path, 'build.json')) as f:
+    with open(os.path.join(install_path, 'bmeta.json')) as f:
         bmeta = json.load(f)
 
-    data = {k: bmeta[v] for k, v in {
-        'path': 'file_server_resource',
-        'file_server_resource': 'file_server_resource',
-        'job': 'job',
-        'git_branch': 'git_branch',
-        'arch': 'arch',
-        'kernel': 'git_describe',
-        'build_environment': 'build_environment',
-        'defconfig': 'defconfig',
-        'defconfig_full': 'defconfig_full',
-    }.iteritems()}
-
     if json_path:
-        json_data = dict(data)
-        for k in ['kernel_image', 'modules', 'git_commit', 'git_url']:
-            json_data[k] = bmeta[k]
-        json_data['status'] = bmeta['build_result']
-        dtb_data = []
-        if bmeta['dtb_dir']:
-            dtb_dir = os.path.join(install_path, bmeta['dtb_dir'])
-            for root, dirs, files in os.walk(dtb_dir):
-                if root != dtb_dir:
-                    rel = os.path.relpath(root, dtb_dir)
-                    files = list(os.path.join(rel, dtb) for dtb in files)
-                dtb_data += files
-        json_data['dtb_dir_data'] = dtb_data
+        with open(os.path.join(install_path, 'dtbs.json')) as f:
+            dtbs = json.load(f)['dtbs']
+        bmeta['dtb_dir_data'] = dtbs
         try:
             with open(json_path, 'r') as json_file:
                 full_json = json.load(json_file)
-            full_json.append(json_data)
+            full_json.append(bmeta)
         except Exception as e:
-            full_json = [json_data]
+            full_json = [bmeta]
         with open(json_path, 'w') as json_file:
             json.dump(full_json, json_file)
 
     if api and token:
+        data = {k: bmeta[v] for k, v in {
+            'path': 'file_server_resource',
+            'file_server_resource': 'file_server_resource',
+            'job': 'job',
+            'git_branch': 'git_branch',
+            'arch': 'arch',
+            'kernel': 'git_describe',
+            'build_environment': 'build_environment',
+            'defconfig': 'defconfig',
+            'defconfig_full': 'defconfig_full',
+        }.iteritems()}
         headers = {
             'Authorization': token,
             'Content-Type': 'application/json',
         }
-
         url = urlparse.urljoin(api, '/build')
-        json_data = json.dumps(data)
-        resp = requests.post(url, headers=headers, data=json_data)
+        data_json = json.dumps(data)
+        resp = requests.post(url, headers=headers, data=data_json)
         resp.raise_for_status()
 
     return True
+
+
+def load_json(bmeta_json, dtbs_json):
+    """Load the build meta-data from JSON files and return dictionaries
+
+    *bmeta_json* is the path to a kernel build meta-data JSON file
+    *dtbs_json* is the path to a kernel dtbs JSON file
+
+    The returned value is a 2-tuple with the bmeta and dtbs data.
+    """
+    with open(bmeta_json) as json_file:
+        bmeta = json.load(json_file)
+    with open(dtbs_json) as json_file:
+        dtbs = json.load(json_file)['dtbs']
+    return bmeta, dtbs

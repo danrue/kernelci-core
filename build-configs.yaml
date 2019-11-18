@@ -19,6 +19,9 @@ trees:
   ardb:
     url: "git://git.kernel.org/pub/scm/linux/kernel/git/ardb/linux.git"
 
+  arm64:
+    url: "git://git.kernel.org/pub/scm/linux/kernel/git/arm64/linux.git"
+
   arnd:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/arnd/playground.git"
 
@@ -57,6 +60,9 @@ trees:
 
   krzysztof:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux.git"
+
+  lee:
+    url: "https://git.kernel.org/pub/scm/linux/kernel/git/lee/linux.git"
 
   linaro-android:
     url: "https://android-git.linaro.org/git/kernel/linaro-android.git"
@@ -100,6 +106,9 @@ trees:
   samsung:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/kgene/linux-samsung.git"
 
+  sashal:
+    url: "https://git.kernel.org/pub/scm/linux/kernel/git/sashal/linux-stable.git"
+
   soc:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc.git"
 
@@ -111,6 +120,9 @@ trees:
 
   tegra:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux.git"
+
+  thermal:
+    url: "https://git.kernel.org/pub/scm/linux/kernel/git/thermal/linux.git"
 
   ulfh:
     url: "https://git.kernel.org/pub/scm/linux/kernel/git/ulfh/mmc.git"
@@ -149,7 +161,7 @@ fragments:
       - 'CONFIG_VIDEO_VIVID_MAX_DEVS=64'
 
   x86_kvm_guest:
-    path: "arch/x86/configs/kvm_guest.config"
+    path: "kernel/configs/kvm_guest.config"
 
   lkft:
     path: "kernel/configs/lkft.config"
@@ -255,64 +267,67 @@ build_environments:
 
 # Default config with full build coverage
 build_configs_defaults:
+  variants:
+    gcc-8:
+      build_environment: gcc-8
 
-  gcc-8:
+      fragments: &default_fragments
+        - 'debug'
+        - 'kselftest'
+        - 'tinyconfig'
 
-    build_environment: gcc-8
+      architectures: &default_architectures
 
-    fragments: &default_fragments
-      - 'debug'
-      - 'kselftest'
-      - 'tinyconfig'
+        arc: &arc_arch
+          base_defconfig: 'nsim_hs_defconfig'
+          extra_configs: ['allnoconfig']
+          filters: &arc_default_filters
+            # remove any non-ARCv2 defconfigs since we only have ARCv2 toolchain
+            - blacklist:
+                defconfig:
+                  - 'axs101_defconfig'
+                  - 'nps_defconfig'
+                  - 'nsim_700_defconfig'
+                  - 'nsimosci_defconfig'
+                  - 'tb10x_defconfig'
 
-    architectures: &default_architectures
+        arm: &arm_arch
+          base_defconfig: 'multi_v7_defconfig'
+          extra_configs:
+            - 'allmodconfig'
+            - 'allnoconfig'
+            - 'multi_v7_defconfig+CONFIG_CPU_BIG_ENDIAN=y'
+            - 'multi_v7_defconfig+CONFIG_SMP=n'
+            - 'multi_v7_defconfig+CONFIG_EFI=y+CONFIG_ARM_LPAE=y'
 
-      arc: &arc_arch
-        base_defconfig: 'nsim_hs_defconfig'
-        extra_configs: ['allnoconfig']
-        filters: &arc_default_filters
-          # remove any non-ARCv2 defconfigs since we only have ARCv2 toolchain
-          - blacklist:
-              defconfig:
-                - 'axs101_defconfig'
-                - 'nps_defconfig'
-                - 'nsim_700_defconfig'
-                - 'nsimosci_defconfig'
-                - 'tb10x_defconfig'
+        arm64: &arm64_arch
+          extra_configs:
+            - 'allmodconfig'
+            - 'allnoconfig'
+            - 'defconfig+CONFIG_CPU_BIG_ENDIAN=y'
+            - 'defconfig+CONFIG_RANDOMIZE_BASE=y'
 
-      arm: &arm_arch
-        base_defconfig: 'multi_v7_defconfig'
-        extra_configs:
-          - 'allnoconfig'
-          - 'multi_v7_defconfig+CONFIG_CPU_BIG_ENDIAN=y'
-          - 'multi_v7_defconfig+CONFIG_SMP=n'
-          - 'multi_v7_defconfig+CONFIG_EFI=y+CONFIG_ARM_LPAE=y'
+        i386: &i386_arch
+          base_defconfig: 'i386_defconfig'
+          extra_configs: ['allnoconfig']
 
-      arm64: &arm64_arch
-        extra_configs:
-          - 'allmodconfig'
-          - 'allnoconfig'
-          - 'defconfig+CONFIG_CPU_BIG_ENDIAN=y'
-          - 'defconfig+CONFIG_RANDOMIZE_BASE=y'
+        mips: &mips_arch
+          base_defconfig: '32r2el_defconfig'
+          extra_configs: ['allnoconfig']
+          filters: &mips_default_filters
+            - blacklist: {defconfig: ['generic_defconfig']}
 
-      i386: &i386_arch
-        base_defconfig: 'i386_defconfig'
-        extra_configs: ['allnoconfig']
+        riscv: &riscv_arch
+          extra_configs: ['allnoconfig']
 
-      mips: &mips_arch
-        base_defconfig: '32r2el_defconfig'
-        extra_configs: ['allnoconfig']
-        filters: &mips_default_filters
-          - blacklist: {defconfig: ['generic_defconfig']}
+        x86_64: &x86_64_arch
+          base_defconfig: 'x86_64_defconfig'
+          extra_configs: ['allmodconfig', 'allnoconfig']
+          fragments: [x86_kvm_guest]
 
-      riscv: &riscv_arch
-        extra_configs: ['allnoconfig']
-
-      x86_64: &x86_64_arch
-        base_defconfig: 'x86_64_defconfig'
-        extra_configs: ['allmodconfig', 'allnoconfig']
-        fragments: [x86_kvm_guest]
-
+  reference:
+    tree: mainline
+    branch: 'master'
 
 # Minimum architecture defconfigs
 arch_defconfigs: &arch_defconfigs
@@ -340,6 +355,12 @@ arch_defconfigs: &arch_defconfigs
     base_defconfig: 'x86_64_defconfig'
     filters:
       - regex: { defconfig: 'x86_64_defconfig' }
+
+
+minimal_variants: &minimal_variants
+  gcc-8:
+    build_environment: gcc-8
+    architectures: *arch_defconfigs
 
 
 # Build fewer kernel configs with stable branches
@@ -445,6 +466,10 @@ build_configs:
     tree: android
     branch: 'android-4.9-q'
 
+  android_4.9-q-release:
+    tree: android
+    branch: 'android-4.9-q-release'
+
   android_4.14-p:
     tree: android
     branch: 'android-4.14-p'
@@ -457,6 +482,10 @@ build_configs:
     tree: android
     branch: 'android-4.14-q'
 
+  android_4.14-q-release:
+    tree: android
+    branch: 'android-4.14-q-release'
+
   android_4.14-r:
     tree: android
     branch: 'android-4.14-r'
@@ -464,6 +493,10 @@ build_configs:
   android_4.19-q:
     tree: android
     branch: 'android-4.19-q'
+
+  android_4.19-q-release:
+    tree: android
+    branch: 'android-4.19-q-release'
 
   android_4.19-r:
     tree: android
@@ -499,6 +532,19 @@ build_configs:
               - 'multi_v7_defconfig+CONFIG_RANDOMIZE_BASE=y'
               - 'multi_v7_defconfig+CONFIG_THUMB2_KERNEL=y+CONFIG_RANDOMIZE_BASE=y'
               - 'omap2plus_defconfig+CONFIG_RANDOMIZE_BASE=y'
+
+  arm64:
+    tree: arm64
+    branch: 'for-kernelci'
+    variants:
+      gcc-8:
+        build_environment: gcc-8
+        architectures:
+          arm64:
+            base_defconfig: 'defconfig'
+            extra_configs:
+              - 'allmodconfig'
+              - 'allnoconfig'
 
   arnd:
     tree: arnd
@@ -561,6 +607,17 @@ build_configs:
     tree: krzysztof
     branch: 'for-next'
 
+  lee_android_3.18:
+    tree: lee
+    branch: 'android-3.18-preview'
+    variants:
+      gcc-8:
+        build_environment: gcc-8
+        architectures:
+          x86_64: *x86_64_arch
+          arm64: *arm64_arch
+          arm: *arm_arch
+
   linaro-android:
     tree: linaro-android
     branch: 'linaro-android-llct'
@@ -568,26 +625,17 @@ build_configs:
   linusw_devel:
     tree: linusw
     branch: 'devel'
-    variants:
-      gcc-8:
-        build_environment: gcc-8
-        architectures: *arch_defconfigs
+    variants: *minimal_variants
 
   linusw_fixes:
     tree: linusw
     branch: 'fixes'
-    variants:
-      gcc-8:
-        build_environment: gcc-8
-        architectures: *arch_defconfigs
+    variants: *minimal_variants
 
   linusw_for-next:
     tree: linusw
     branch: 'for-next'
-    variants:
-      gcc-8:
-        build_environment: gcc-8
-        architectures: *arch_defconfigs
+    variants: *minimal_variants
 
   lsk_for-test:
     tree: lsk
@@ -768,6 +816,11 @@ build_configs:
     tree: samsung
     branch: 'for-next'
 
+  sashal_stable-next:
+    tree: sashal
+    branch: 'stable-next'
+    variants: *stable_variants
+
 #  Disabled as the branch name contains a '/'.  See discussion here:
 #  https://github.com/kernelci/kernelci-core/issues/23
 #
@@ -819,49 +872,91 @@ build_configs:
     branch: 'linux-5.2.y'
     variants: *stable_variants
 
+  stable_5.3:
+    tree: stable
+    branch: 'linux-5.3.y'
+    variants: *stable_variants
+
   stable-rc_3.18:
     tree: stable-rc
     branch: 'linux-3.18.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-3.18.y'
 
   stable-rc_4.4:
     tree: stable-rc
     branch: 'linux-4.4.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-4.4.y'
 
   stable-rc_4.9:
     tree: stable-rc
     branch: 'linux-4.9.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-4.9.y'
 
   stable-rc_4.14:
     tree: stable-rc
     branch: 'linux-4.14.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-4.14.y'
 
   stable-rc_4.19:
     tree: stable-rc
     branch: 'linux-4.19.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-4.19.y'
 
   stable-rc_5.0:
     tree: stable-rc
     branch: 'linux-5.0.y'
     variants: *stable_variants
+    reference:
+          tree: stable
+          branch: 'linux-5.0.y'
 
   stable-rc_5.1:
     tree: stable-rc
     branch: 'linux-5.1.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-5.1.y'
 
   stable-rc_5.2:
     tree: stable-rc
     branch: 'linux-5.2.y'
     variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-5.2.y'
+
+  stable-rc_5.3:
+    tree: stable-rc
+    branch: 'linux-5.3.y'
+    variants: *stable_variants
+    reference:
+      tree: stable
+      branch: 'linux-5.3.y'
 
   tegra:
     tree: tegra
     branch: 'for-next'
+
+  thermal:
+    tree: thermal
+    branch: 'testing'
+    variants: *minimal_variants
 
   ulfh:
     tree: ulfh
@@ -870,10 +965,7 @@ build_configs:
   vireshk:
     tree: vireshk
     branch: 'for-kernelci'
-    variants:
-      gcc-8:
-        build_environment: gcc-8
-        architectures: *arch_defconfigs
+    variants: *minimal_variants
 
   mainline_lkft:
     tree: mainline

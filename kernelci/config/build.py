@@ -49,6 +49,33 @@ class Tree(YAMLObject):
         return self._url
 
 
+class Reference(YAMLObject):
+    """Kernel reference tree and branch model."""
+
+    def __init__(self, tree, branch):
+        """Reference is a tree and branch used for bisections
+
+        *tree* is a Tree object
+        *branch* is the branch name to be used from the tree
+        """
+        self._tree = tree
+        self._branch = branch
+
+    @classmethod
+    def from_yaml(cls, reference, trees):
+        kw = cls._kw_from_yaml(reference, ['tree', 'branch'])
+        kw['tree'] = trees[kw['tree']]
+        return cls(**kw)
+
+    @property
+    def tree(self):
+        return self._tree
+
+    @property
+    def branch(self):
+        return self._branch
+
+
 class Fragment(YAMLObject):
     """Kernel config fragment model."""
 
@@ -290,7 +317,7 @@ class BuildVariant(YAMLObject):
 class BuildConfig(YAMLObject):
     """Build configuration model."""
 
-    def __init__(self, name, tree, branch, variants):
+    def __init__(self, name, tree, branch, variants, reference=None):
         """A build configuration defines the actual kernels to be built.
 
         *name* is the name of the build configuration.  It is arbitrary and
@@ -304,11 +331,17 @@ class BuildConfig(YAMLObject):
 
         *variants* is a list of BuildVariant objects, to define all the
                    variants to build for this tree / branch combination.
+
+        *reference* is a Reference object which defines the tree and branch for
+                    bisections when no base commit is found for the good and
+                    bad revisions.  It can also be None if no reference branch
+                    can be used with this build configuration.
         """
         self._name = name
         self._tree = tree
         self._branch = branch
         self._variants = variants
+        self._reference = reference
 
     @classmethod
     def from_yaml(cls, config, name, trees, fragments, build_envs, defaults):
@@ -318,12 +351,16 @@ class BuildConfig(YAMLObject):
         kw.update(cls._kw_from_yaml(
             config, ['name', 'tree', 'branch']))
         kw['tree'] = trees[kw['tree']]
-        config_variants = config.get('variants', defaults)
+        default_variants = defaults.get('variants', {})
+        config_variants = config.get('variants', default_variants)
         variants = [
             BuildVariant.from_yaml(variant, name, fragments, build_envs)
             for name, variant in config_variants.iteritems()
         ]
         kw['variants'] = {v.name: v for v in variants}
+        reference = config.get('reference', defaults.get('reference'))
+        if reference:
+            kw['reference'] = Reference.from_yaml(reference, trees)
         return cls(**kw)
 
     @property
@@ -344,6 +381,10 @@ class BuildConfig(YAMLObject):
 
     def get_variant(self, name):
         return self._variants[name]
+
+    @property
+    def reference(self):
+        return self._reference
 
 
 def from_yaml(yaml_path):

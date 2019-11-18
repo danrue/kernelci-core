@@ -128,6 +128,14 @@ class DeviceType_arm64(DeviceType):
         super(DeviceType_arm64, self).__init__(name, mach, arch, *args, **kw)
 
 
+class DeviceType_riscv(DeviceType):
+
+    def __init__(self, name, mach, arch='riscv', *args, **kw):
+        """RISCV device type with a device tree."""
+        kw.setdefault('dtb', '{}/{}.dtb'.format(mach, name))
+        super(DeviceType_riscv, self).__init__(name, mach, arch, *args, **kw)
+
+
 class DeviceTypeFactory(YAMLObject):
     """Factory to create device types from YAML data."""
 
@@ -136,6 +144,7 @@ class DeviceTypeFactory(YAMLObject):
         'mips-dtb': DeviceType_mips,
         'arm-dtb': DeviceType_arm,
         'arm64-dtb': DeviceType_arm64,
+        'riscv-dtb': DeviceType_riscv,
     }
 
     @classmethod
@@ -272,7 +281,8 @@ class RootFS(YAMLObject):
 class TestPlan(YAMLObject):
     """Test plan model."""
 
-    _pattern = '{plan}/{category}-{method}-{protocol}-{rootfs}-{plan}-template.jinja2'
+    _pattern = \
+        '{plan}/{category}-{method}-{protocol}-{rootfs}-{plan}-template.jinja2'
 
     def __init__(self, name, rootfs, base_name=None, params=None,
                  category='generic', filters=None, pattern=None):
@@ -351,8 +361,6 @@ class TestPlan(YAMLObject):
             plan=self.name)
 
     def match(self, config):
-        if self.name == 'boot':
-            return True
         return all(f.match(**config) for f in self._filters)
 
 
@@ -391,10 +399,12 @@ class TestConfig(YAMLObject):
     def test_plans(self):
         return self._test_plans
 
-    def match(self, arch, plan, flags, config):
+    def match(self, arch, flags, config, plan=None):
         return (
-            plan in self._test_plans and
-            self._test_plans[plan].match(config) and
+            (plan is None or (
+                plan in self._test_plans and
+                self._test_plans[plan].match(config)
+            )) and
             self.device_type.arch == arch and
             self.device_type.match(flags, config) and
             all(f.match(**config) for f in self._filters)
