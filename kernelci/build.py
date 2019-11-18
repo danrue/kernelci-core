@@ -61,7 +61,6 @@ def _get_last_commit_file_name(config):
 
 def _upload_files(api, token, path, input_files):
     if api.startswith('s3://'):
-        #s3_bucket = api.replace("http://", "s3://").replace("https://", "s3://")
         acl = '--acl public-read'
         content_type = ''
         for filename, contents in input_files.items():
@@ -76,7 +75,8 @@ def _upload_files(api, token, path, input_files):
                 content_type = '--content-type text/plain'
             if isinstance(contents, file):
                 filename = contents.name
-            command_line = "aws s3 cp {} {} {} {}".format(filename, remote_path, acl, content_type)
+            command_line = "aws s3 cp {} {} {} {}".format(
+                filename, remote_path, acl, content_type)
             cmd_output = shell_cmd(command_line)
     else:
         headers = {
